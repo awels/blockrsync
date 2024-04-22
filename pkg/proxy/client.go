@@ -8,15 +8,15 @@ import (
 	"github.com/go-logr/logr"
 )
 
-type BlockrsyncClient struct {
+type ProxyClient struct {
 	listenPort    int
 	targetPort    int
 	targetAddress string
 	log           logr.Logger
 }
 
-func NewBlockrsyncClient(listenPort, targetPort int, targetAddress string, logger logr.Logger) *BlockrsyncClient {
-	return &BlockrsyncClient{
+func NewProxyClient(listenPort, targetPort int, targetAddress string, logger logr.Logger) *ProxyClient {
+	return &ProxyClient{
 		listenPort:    listenPort,
 		targetPort:    targetPort,
 		targetAddress: targetAddress,
@@ -24,7 +24,10 @@ func NewBlockrsyncClient(listenPort, targetPort int, targetAddress string, logge
 	}
 }
 
-func (b *BlockrsyncClient) ConnectToTarget(nameMD5sum string) error {
+func (b *ProxyClient) ConnectToTarget(identifier string) error {
+	if len(identifier) != identifierLength {
+		return fmt.Errorf("identifier must be %d characters", identifierLength)
+	}
 	b.log.Info("Listening:", "host", "localhost", "port", b.listenPort)
 	// Create a listener on the desired port
 	listener, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", b.listenPort))
@@ -47,7 +50,7 @@ func (b *BlockrsyncClient) ConnectToTarget(nameMD5sum string) error {
 	defer outConn.Close()
 
 	// Write the header to the writer
-	_, err = outConn.Write([]byte(nameMD5sum))
+	_, err = outConn.Write([]byte(identifier))
 	if err != nil {
 		return err
 	}

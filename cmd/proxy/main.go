@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/awels/blockrsync/pkg/blockrsync"
+	"github.com/awels/blockrsync/pkg/proxy"
 )
 
 type arrayFlags []string
@@ -70,10 +70,10 @@ func main() {
 			os.Exit(1)
 		}
 		if len(identifiers) > 1 || len(identifiers) == 0 {
-			fmt.Fprintf(os.Stderr, "Only one identifier can be specified in source mode\n")
+			fmt.Fprintf(os.Stderr, "Only one identifier must be specified in source mode\n")
 			os.Exit(1)
 		}
-		client := blockrsync.NewBlockrsyncClient(*listenPort, *targetPort, *targetAddress, logger)
+		client := proxy.NewProxyClient(*listenPort, *targetPort, *targetAddress, logger)
 
 		if err := client.ConnectToTarget(identifiers[0]); err != nil {
 			logger.Error(err, "Unable to connect to target", "identifier", identifiers[0], "target address", *targetAddress)
@@ -84,14 +84,14 @@ func main() {
 			fmt.Fprintf(os.Stderr, "At least one identifier must be specified in target mode\n")
 			os.Exit(1)
 		}
-		server := blockrsync.NewBlockrsyncServer(*blockrsyncPath, listenPort, len(identifiers), logger)
+		server := proxy.NewProxyServer(*blockrsyncPath, *listenPort, identifiers, logger)
 
 		if err := server.StartServer(); err != nil {
 			logger.Error(err, "Unable to start server")
 			os.Exit(1)
 		}
 	} else {
-		fmt.Fprintf(os.Stderr, "Either source or target must be defined\n")
+		fmt.Fprintf(os.Stderr, "Must specify source or target, but not both\n")
 		os.Exit(1)
 	}
 }

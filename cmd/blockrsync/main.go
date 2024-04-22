@@ -1,28 +1,17 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"net"
 	"os"
-	"path/filepath"
-	"time"
 
 	"go.uber.org/zap/zapcore"
 
-	"github.com/dop251/diskrsync"
-	"github.com/dop251/spgz"
-	"github.com/go-logr/logr"
 	"github.com/spf13/pflag"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-)
 
-type options struct {
-	noCompress bool
-	verbose    bool
-}
+	"github.com/awels/blockrsync/pkg/blockrsync"
+)
 
 func usage() {
 	_, _ = fmt.Fprintf(os.Stderr, "Usage: %s [devicepath] [flags]\n", os.Args[0])
@@ -35,13 +24,12 @@ func main() {
 		sourceMode    = flag.Bool("source", false, "Source mode")
 		targetMode    = flag.Bool("target", false, "Target mode")
 		targetAddress = flag.String("target-address", "", "address of the server, source only")
-		// controlFile   = flag.String("control-file", "", "name and path to file to write when finished")
-		port = flag.Int("port", 8000, "port to listen on or connect to")
+		port          = flag.Int("port", 8000, "port to listen on or connect to")
 	)
-	opts := options{}
+	opts := blockrsync.BlockRsyncOptions{}
 
-	flag.BoolVar(&opts.noCompress, "no-compress", false, "Store target as a raw file")
-	flag.BoolVar(&opts.verbose, "verbose", true, "Print statistics, progress, and some debug info")
+	flag.BoolVar(&opts.NoCompress, "no-compress", false, "Store target as a raw file")
+	flag.BoolVar(&opts.Verbose, "verbose", true, "Print statistics, progress, and some debug info")
 
 	zapopts := zap.Options{
 		Development: true,
@@ -62,23 +50,14 @@ func main() {
 			usage()
 			os.Exit(1)
 		}
-		if err := connectToTarget(os.Args[1], *targetAddress, *port, &opts, logger); err != nil {
+		blockrsyncClient := blockrsync.NewBlockrsyncClient(os.Args[1], *targetAddress, *port, &opts, logger)
+		if err := blockrsyncClient.ConnectToTarget(); err != nil {
 			logger.Error(err, "Unable to connect to target", "source file", os.Args[1], "target address", *targetAddress)
 			os.Exit(1)
 		}
 	} else if *targetMode && !*sourceMode {
-		// if controlFile == nil || *controlFile == "" {
-		// 	fmt.Fprintf(os.Stderr, "control-file must be specified with target flag\n")
-		// 	usage()
-		// 	os.Exit(1)
-		// }
-		// defer func() {
-		// 	logger.Info("Writing control file", "file", *controlFile)
-		// 	if err := createControlFile(*controlFile); err != nil {
-		// 		logger.Error(err, "Unable to create control file")
-		// 	}
-		// }()
-		if err := startServer(os.Args[1], *port, &opts, logger); err != nil {
+		blockrsyncServer := blockrsync.NewBlockrsyncServer(os.Args[1], *port, &opts, logger)
+		if err := blockrsyncServer.StartServer(); err != nil {
 			logger.Error(err, "Unable to start server to write to file", "target file", os.Args[1])
 			os.Exit(1)
 		}
@@ -88,170 +67,4 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("Successfully completed sync")
-}
-
-func createControlFile(fileName string) error {
-	if err := os.MkdirAll(filepath.Dir(fileName), 0755); err != nil {
-		return err
-	}
-	_, err := os.Create(fileName)
-	return err
-}
-
-func connectToTarget(sourceFile, targetAddress string, port int, opts *options, logger logr.Logger) error {
-	f, err := os.Open(sourceFile)
-	if err != nil {
-		return err
-	}
-	logger.Info("Opened filed", "file", sourceFile)
-	defer f.Close()
-	var src io.ReadSeeker
-
-	// Try to open as an spgz file
-	sf, err := spgz.NewFromFile(f, os.O_RDONLY)
-	if err != nil {
-		if !errors.Is(err, spgz.ErrInvalidFormat) {
-			return err
-		}
-		logger.Info("Not an spgz file")
-		src = f
-	} else {
-		logger.Info("spgz file")
-		src = sf
-	}
-
-	size, err := src.Seek(0, io.SeekEnd)
-	if err != nil {
-		return err
-	}
-
-	_, err = src.Seek(0, io.SeekStart)
-	if err != nil {
-		return err
-	}
-
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", targetAddress, port))
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	logger.Info("source", "size", size)
-	calcProgress := &progress{
-		progressType: "calc progress",
-		logger:       logger,
-	}
-	syncProgress := &progress{
-		progressType: "sync progress",
-		logger:       logger,
-	}
-	return diskrsync.Source(src, size, conn, conn, true, opts.verbose, calcProgress, syncProgress)
-}
-
-//nolint:funlen
-func startServer(targetFile string, port int, opts *options, logger logr.Logger) error {
-	var w spgz.SparseFile
-	useReadBuffer := false
-
-	f, err := os.OpenFile(targetFile, os.O_RDWR|os.O_CREATE, 0666)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	logger.Info("Opened file", "file", targetFile)
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	logger.Info("file info", "info", info)
-
-	if info.Mode()&(os.ModeDevice|os.ModeCharDevice) != 0 {
-		logger.Info("device file?")
-		w = spgz.NewSparseFileWithoutHolePunching(f)
-		useReadBuffer = true
-	} else if !opts.noCompress {
-		sf, err := spgz.NewFromFileSize(f, os.O_RDWR|os.O_CREATE, diskrsync.DefTargetBlockSize)
-		if err != nil {
-			if !errors.Is(err, spgz.ErrInvalidFormat) {
-				if errors.Is(err, spgz.ErrPunchHoleNotSupported) {
-					err = fmt.Errorf(
-						"target does not support compression. Try with -no-compress option (error was '%w')", err)
-				}
-				return err
-			}
-		} else {
-			w = &diskrsync.FixingSpgzFileWrapper{SpgzFile: sf}
-		}
-	}
-
-	if w == nil {
-		w = spgz.NewSparseFileWithFallback(f)
-		useReadBuffer = true
-	}
-
-	defer func() {
-		cerr := w.Close()
-		if err == nil {
-			err = cerr
-		}
-	}()
-
-	size, err := w.Seek(0, io.SeekEnd)
-	if err != nil {
-		return err
-	}
-
-	_, err = w.Seek(0, io.SeekStart)
-	logger.Info("Size", "size", size)
-
-	if err != nil {
-		return err
-	}
-
-	logger.Info("Listening for tcp connection", "port", fmt.Sprintf(":%d", port))
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		return err
-	}
-	conn, err := listener.Accept()
-	if err != nil {
-		return err
-	}
-
-	calcProgress := &progress{
-		progressType: "calc progress",
-		logger:       logger,
-	}
-	syncProgress := &progress{
-		progressType: "sync progress",
-		logger:       logger,
-	}
-	err = diskrsync.Target(w, size, conn, conn, useReadBuffer, opts.verbose, calcProgress, syncProgress)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-type progress struct {
-	total        int64
-	current      int64
-	progressType string
-	lastUpdate   time.Time
-	logger       logr.Logger
-}
-
-func (p *progress) Start(size int64) {
-	p.total = size
-	p.current = int64(0)
-	p.lastUpdate = time.Now()
-	p.logger.Info(fmt.Sprintf("%s total size %d", p.progressType, p.total))
-}
-
-func (p *progress) Update(pos int64) {
-	p.current = pos
-	if time.Since(p.lastUpdate).Seconds() > time.Second.Seconds() {
-		p.logger.Info(fmt.Sprintf("%s %.2f%%", p.progressType, (float64(p.current) / float64(p.total) * 100)))
-		p.lastUpdate = time.Now()
-	}
 }
