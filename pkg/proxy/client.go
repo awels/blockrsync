@@ -1,0 +1,66 @@
+package proxy
+
+import (
+	"fmt"
+	"io"
+	"net"
+
+	"github.com/go-logr/logr"
+)
+
+type BlockrsyncClient struct {
+	listenPort    int
+	targetPort    int
+	targetAddress string
+	log           logr.Logger
+}
+
+func NewBlockrsyncClient(listenPort, targetPort int, targetAddress string, logger logr.Logger) *BlockrsyncClient {
+	return &BlockrsyncClient{
+		listenPort:    listenPort,
+		targetPort:    targetPort,
+		targetAddress: targetAddress,
+		log:           logger,
+	}
+}
+
+func (b *BlockrsyncClient) ConnectToTarget(nameMD5sum string) error {
+	b.log.Info("Listening:", "host", "localhost", "port", b.listenPort)
+	// Create a listener on the desired port
+	listener, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", b.listenPort))
+	if err != nil {
+		return err
+	}
+
+	// Accept incoming connections
+	inConn, err := listener.Accept()
+	if err != nil {
+		return err
+	}
+	defer inConn.Close()
+
+	b.log.Info("Connecting to target", "address", b.targetAddress, "port", b.targetPort)
+	outConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", b.targetAddress, b.targetPort))
+	if err != nil {
+		return err
+	}
+	defer outConn.Close()
+
+	// Write the header to the writer
+	_, err = outConn.Write([]byte(nameMD5sum))
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		n, _ := io.Copy(inConn, outConn)
+		b.log.Info("bytes copied from server to client", "count", n)
+	}()
+
+	n, err := io.Copy(outConn, inConn)
+	if err != nil {
+		return err
+	}
+	b.log.Info("bytes copied", "count", n)
+	return nil
+}
