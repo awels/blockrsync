@@ -23,6 +23,7 @@ RUN go mod download
 # Copy the go source
 COPY cmd/ cmd/
 COPY ./vendor/. vendor/
+COPY ./pkg/. pkg/
 
 RUN ls -al vendor/github.com/dop251/diskrsync/ 
 

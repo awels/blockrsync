@@ -108,7 +108,10 @@ func (b *ProxyServer) getTargetFileFromIdentifier(conn net.Conn) (string, string
 	}
 	file := os.Getenv(string(header))
 	if file == "" {
-		return "", "", fmt.Errorf("no filepath found for %s", string(header))
+		file = os.Getenv((fmt.Sprintf("id-%s", header)))
+		if file == "" {
+			return "", "", fmt.Errorf("no filepath found for %s", string(header))
+		}
 	}
 	return file, string(header), nil
 }
@@ -152,7 +155,7 @@ func (b *ProxyServer) startsBlockrsyncServer(conn net.Conn, file string, blockry
 		b.log.Info("Connecting to blockrsync server", "port", port)
 		blockRsyncConn, err = net.Dial("tcp", fmt.Sprintf("localhost:%d", port))
 		if err != nil {
-			b.log.Info("Waiting to connect to blockrsync server")
+			b.log.Info("Waiting to connect to blockrsync server", "error", err)
 			time.Sleep(1 * time.Second)
 		} else {
 			b.log.Info("Connected to blockrsync server")

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/go-logr/logr"
 )
@@ -43,9 +44,22 @@ func (b *ProxyClient) ConnectToTarget(identifier string) error {
 	defer inConn.Close()
 
 	b.log.Info("Connecting to target", "address", b.targetAddress, "port", b.targetPort)
-	outConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", b.targetAddress, b.targetPort))
-	if err != nil {
-		return err
+	retry := true
+	var outConn net.Conn
+	retryCount := 0
+	for retry {
+		outConn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", b.targetAddress, b.targetPort))
+		retry = err != nil
+		if err != nil {
+			b.log.Error(err, "Unable to connect to target")
+		}
+		if retry {
+			retryCount++
+			time.Sleep(time.Second)
+			if retryCount > 30 {
+				return fmt.Errorf("unable to connect to target after %d retries", retryCount)
+			}
+		}
 	}
 	defer outConn.Close()
 

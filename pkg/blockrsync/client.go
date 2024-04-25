@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"time"
 
 	"github.com/dop251/diskrsync"
 	"github.com/dop251/spgz"
@@ -62,9 +63,22 @@ func (b *BlockrsyncClient) ConnectToTarget() error {
 		return err
 	}
 
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", b.targetAddress, b.port))
-	if err != nil {
-		return err
+	retry := true
+	var conn net.Conn
+	retryCount := 0
+	for retry {
+		conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", b.targetAddress, b.port))
+		retry = err != nil
+		if err != nil {
+			b.log.Error(err, "Unable to connect to target")
+		}
+		if retry {
+			retryCount++
+			time.Sleep(time.Second)
+			if retryCount > 30 {
+				return fmt.Errorf("unable to connect to target after %d retries", retryCount)
+			}
+		}
 	}
 	defer conn.Close()
 	b.log.Info("source", "size", size)
