@@ -13,6 +13,7 @@ type progress struct {
 	progressType string
 	lastUpdate   time.Time
 	logger       logr.Logger
+	start        float64
 }
 
 func (p *progress) Start(size int64) {
@@ -25,7 +26,7 @@ func (p *progress) Start(size int64) {
 func (p *progress) Update(pos int64) {
 	p.current = pos
 	if time.Since(p.lastUpdate).Seconds() > time.Second.Seconds() || pos == p.total {
-		p.logger.Info(fmt.Sprintf("%s %.2f%%", p.progressType, (float64(p.current) / float64(p.total) * 100)))
+		p.logger.Info(fmt.Sprintf("%s %.0f%%", p.progressType, (float64(p.current)/float64(p.total)*50)+p.start))
 		p.lastUpdate = time.Now()
 	}
 }

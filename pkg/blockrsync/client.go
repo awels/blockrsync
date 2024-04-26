@@ -85,10 +85,12 @@ func (b *BlockrsyncClient) ConnectToTarget() error {
 	calcProgress := &progress{
 		progressType: "calc progress",
 		logger:       b.log,
+		start:        float64(0),
 	}
 	syncProgress := &progress{
 		progressType: "sync progress",
 		logger:       b.log,
+		start:        float64(50),
 	}
 	return diskrsync.Source(src, size, conn, conn, true, b.opts.Verbose, calcProgress, syncProgress)
 }

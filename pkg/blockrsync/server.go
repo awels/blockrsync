@@ -63,15 +63,7 @@ func (b *BlockrsyncServer) StartServer() error {
 		return err
 	}
 
-	calcProgress := &progress{
-		progressType: "calc progress",
-		logger:       b.log,
-	}
-	syncProgress := &progress{
-		progressType: "sync progress",
-		logger:       b.log,
-	}
-	err = diskrsync.Target(file, size, conn, conn, useReadBuffer, b.opts.Verbose, calcProgress, syncProgress)
+	err = diskrsync.Target(file, size, conn, conn, useReadBuffer, b.opts.Verbose, nil, nil)
 	if err != nil {
 		return err
 	}
