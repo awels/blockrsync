@@ -34,6 +34,7 @@ func main() {
 		listenPort     = flag.Int("listen-port", 9080, "port to listen on")
 		targetPort     = flag.Int("target-port", 9000, "target port to connect to")
 		blockrsyncPath = flag.String("blockrsync-path", "/blockrsync", "path to blockrsync binary")
+		blockSize      = flag.Int("block-size", 65536, "block size, must be > 0 and a multiple of 4096")
 	)
 
 	var identifiers arrayFlags
@@ -84,7 +85,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "At least one identifier must be specified in target mode\n")
 			os.Exit(1)
 		}
-		server := proxy.NewProxyServer(*blockrsyncPath, *listenPort, identifiers, logger)
+		server := proxy.NewProxyServer(*blockrsyncPath, *blockSize, *listenPort, identifiers, logger)
 
 		if err := server.StartServer(); err != nil {
 			logger.Error(err, "Unable to start server")

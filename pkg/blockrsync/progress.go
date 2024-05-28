@@ -26,7 +26,7 @@ func (p *progress) Start(size int64) {
 func (p *progress) Update(pos int64) {
 	p.current = pos
 	if time.Since(p.lastUpdate).Seconds() > time.Second.Seconds() || pos == p.total {
-		p.logger.Info(fmt.Sprintf("%s %.0f%%", p.progressType, (float64(p.current)/float64(p.total)*50)+p.start))
+		p.logger.Info(fmt.Sprintf("%s %.0f%%", p.progressType, (float64(p.current) / float64(p.total) * 100)))
 		p.lastUpdate = time.Now()
 	}
 }

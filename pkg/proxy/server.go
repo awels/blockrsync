@@ -16,22 +16,25 @@ import (
 
 const (
 	identifierLength = 32 // Length of the md5sum
+	blockRsyncPort   = 3222
 )
 
 type ProxyServer struct {
 	listenPort     int    // Port to listen on
 	blockrsyncPath string // Path to blockrsync binary
+	blockSize      int    // Block size to use
 	log            logr.Logger
 	identifiers    []string
 	wg             sync.WaitGroup
 }
 
-func NewProxyServer(blockrsyncPath string, listenPort int, identifiers []string, logger logr.Logger) *ProxyServer {
+func NewProxyServer(blockrsyncPath string, blockSize, listenPort int, identifiers []string, logger logr.Logger) *ProxyServer {
 	return &ProxyServer{
 		listenPort:     listenPort,
 		blockrsyncPath: blockrsyncPath,
 		log:            logger,
 		identifiers:    identifiers,
+		blockSize:      blockSize,
 	}
 }
 
@@ -59,7 +62,6 @@ func (b *ProxyServer) StartServer() error {
 }
 
 func (b *ProxyServer) processConnection(listener net.Listener, processing map[string]int, mu *sync.Mutex, i int) {
-	blockRsyncPort := 3222
 	keepTrying := true
 	for keepTrying {
 		b.log.Info("Waiting for connection")
@@ -86,8 +88,8 @@ func (b *ProxyServer) processConnection(listener net.Listener, processing map[st
 			mu.Unlock()
 		}
 
-		b.log.Info("Accepted connection, startin blockrsync server", "port", blockRsyncPort)
-		err = b.startsBlockrsyncServer(conn, file, b.blockrsyncPath, blockRsyncPort+i)
+		b.log.Info("Accepted connection, starting blockrsync server", "port", blockRsyncPort+i)
+		err = b.startsBlockrsyncServer(conn, file, blockRsyncPort+i)
 		if err != nil {
 			b.log.Error(err, "Unable to start blockrsync server")
 		} else {
@@ -116,37 +118,11 @@ func (b *ProxyServer) getTargetFileFromIdentifier(conn net.Conn) (string, string
 	return file, string(header), nil
 }
 
-func (b *ProxyServer) startsBlockrsyncServer(conn net.Conn, file string, blockryncPath string, port int) error {
-	defer conn.Close()
+func (b *ProxyServer) startsBlockrsyncServer(rw io.ReadWriteCloser, file string, port int) error {
+	defer rw.Close()
 
 	b.log.Info("writing to file", "file", file)
-
-	go func() {
-		arguments := []string{
-			file,
-			"--target",
-			"--verbose",
-			"--no-compress",
-			"--port",
-			strconv.Itoa(port),
-		}
-
-		b.log.Info("Starting blockrsync server", "arguments", arguments)
-		cmd := exec.Command(blockryncPath, arguments...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		// Start the command
-		err := cmd.Start()
-		if err != nil {
-			b.log.Error(err, "Unable to start blockrsync server")
-		}
-		// Wait for the command to finish
-		err = cmd.Wait()
-		if err != nil {
-			b.log.Error(err, "Waiting for blockrsync server to complete")
-		}
-	}()
+	go b.forkProcess(file, port)
 
 	notConnect := true
 	var blockRsyncConn net.Conn
@@ -163,13 +139,13 @@ func (b *ProxyServer) startsBlockrsyncServer(conn net.Conn, file string, blockry
 		}
 	}
 	go func() {
-		_, err = io.Copy(conn, blockRsyncConn)
+		_, err = io.Copy(rw, blockRsyncConn)
 		if err != nil {
 			b.log.Error(err, "Unable to copy data from server to client")
 		}
 	}()
 	b.log.Info("Copying data")
-	_, err = io.Copy(blockRsyncConn, conn)
+	_, err = io.Copy(blockRsyncConn, rw)
 	if err != nil {
 		b.log.Error(err, "Unable to copy data from client to server")
 		return err
@@ -177,4 +153,33 @@ func (b *ProxyServer) startsBlockrsyncServer(conn net.Conn, file string, blockry
 
 	b.log.Info("Successfully completed sync proxy")
 	return nil
+}
+
+func (b *ProxyServer) forkProcess(file string, port int) {
+	arguments := []string{
+		file,
+		"--target",
+		"--port",
+		strconv.Itoa(port),
+		"--zap-log-level",
+		"3",
+		"--block-size",
+		strconv.Itoa(b.blockSize),
+	}
+
+	b.log.Info("Starting blockrsync server", "arguments", arguments)
+	cmd := exec.Command(b.blockrsyncPath, arguments...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	// Start the command
+	err := cmd.Start()
+	if err != nil {
+		b.log.Error(err, "Unable to start blockrsync server")
+	}
+	// Wait for the command to finish
+	err = cmd.Wait()
+	if err != nil {
+		b.log.Error(err, "Waiting for blockrsync server to complete")
+	}
 }

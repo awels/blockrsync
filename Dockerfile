@@ -25,8 +25,6 @@ COPY cmd/ cmd/
 COPY ./vendor/. vendor/
 COPY ./pkg/. pkg/
 
-RUN ls -al vendor/github.com/dop251/diskrsync/ 
-
 # Build
 RUN go build -o blockrsync ./cmd/blockrsync/main.go
 RUN go build -o proxy ./cmd/proxy/main.go

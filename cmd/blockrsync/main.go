@@ -28,8 +28,8 @@ func main() {
 	)
 	opts := blockrsync.BlockRsyncOptions{}
 
-	flag.BoolVar(&opts.NoCompress, "no-compress", false, "Store target as a raw file")
-	flag.BoolVar(&opts.Verbose, "verbose", true, "Print statistics, progress, and some debug info")
+	flag.BoolVar(&opts.Preallocation, "preallocate", false, "Preallocate empty file space")
+	flag.IntVar(&opts.BlockSize, "block-size", 65536, "block size, must be > 0 and a multiple of 4096")
 
 	zapopts := zap.Options{
 		Development: true,
@@ -44,6 +44,10 @@ func main() {
 	pflag.Parse()
 	logger := zap.New(zap.UseFlagOptions(&zapopts))
 
+	if opts.BlockSize <= 0 || opts.BlockSize%4096 != 0 {
+		fmt.Fprintf(os.Stderr, "block-size must be > 0 and a multiple of 4096\n")
+		usage()
+	}
 	if *sourceMode && !*targetMode {
 		if targetAddress == nil || *targetAddress == "" {
 			fmt.Fprintf(os.Stderr, "target-address must be specified with source flag\n")
@@ -53,12 +57,14 @@ func main() {
 		blockrsyncClient := blockrsync.NewBlockrsyncClient(os.Args[1], *targetAddress, *port, &opts, logger)
 		if err := blockrsyncClient.ConnectToTarget(); err != nil {
 			logger.Error(err, "Unable to connect to target", "source file", os.Args[1], "target address", *targetAddress)
+			// time.Sleep(5 * time.Minute)
 			os.Exit(1)
 		}
 	} else if *targetMode && !*sourceMode {
 		blockrsyncServer := blockrsync.NewBlockrsyncServer(os.Args[1], *port, &opts, logger)
 		if err := blockrsyncServer.StartServer(); err != nil {
 			logger.Error(err, "Unable to start server to write to file", "target file", os.Args[1])
+			// time.Sleep(5 * time.Minute)
 			os.Exit(1)
 		}
 	} else {
@@ -66,5 +72,6 @@ func main() {
 		usage()
 		os.Exit(1)
 	}
+	// time.Sleep(5 * time.Minute)
 	logger.Info("Successfully completed sync")
 }
