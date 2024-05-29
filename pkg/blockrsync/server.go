@@ -131,15 +131,18 @@ func (b *BlockrsyncServer) truncateFileIfNeeded(f *os.File, sourceSize, targetSi
 	if err != nil {
 		return err
 	}
-	if info.Mode()&(os.ModeDevice|os.ModeCharDevice) == 0 {
-		// Not a block device, truncate the file if it is larger than the source file
+	if targetSize > sourceSize {
 		b.log.V(5).Info("Source size", "size", sourceSize)
-		// Truncate the target file if it is larger than the source file
-		if targetSize > sourceSize {
+		if info.Mode()&(os.ModeDevice|os.ModeCharDevice) == 0 {
+			// Not a block device, truncate the file if it is larger than the source file
+			// Truncate the target file if it is larger than the source file
 			b.log.V(5).Info("Source is smaller than target, truncating file")
 			if err := f.Truncate(sourceSize); err != nil {
 				return err
 			}
+		} else {
+			// empty out existing blocks
+			PunchHole(f, sourceSize, targetSize-sourceSize)
 		}
 	}
 	return nil
@@ -161,15 +164,15 @@ func (b *BlockrsyncServer) handleEmptyBlock(offset int64, f *os.File) error {
 	return nil
 }
 
-func (b *BlockrsyncServer) writeBlockToOffset(block []byte, offset int64, f *os.File) error {
-	n, err := f.Seek(offset, io.SeekStart)
+func (b *BlockrsyncServer) writeBlockToOffset(block []byte, offset int64, ws io.WriteSeeker) error {
+	n, err := ws.Seek(offset, io.SeekStart)
 	if err != nil {
 		return err
 	}
 	if n != offset {
 		return fmt.Errorf("seek to wrong offset %d, expected %d", n, offset)
 	}
-	if n, err := f.Write(block); err != nil {
+	if n, err := ws.Write(block); err != nil {
 		return err
 	} else {
 		b.log.V(5).Info("Wrote", "bytes", n)

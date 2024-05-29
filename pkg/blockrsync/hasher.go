@@ -19,8 +19,7 @@ import (
 )
 
 const (
-	DefaultBlockSize = int64(4 * 1024 * 1024)
-	// DefaultBlockSize   = int64(64 * 1024)
+	DefaultBlockSize   = int64(64 * 1024)
 	defaultConcurrency = 25
 )
 
@@ -57,14 +56,14 @@ func NewFileHasher(blockSize int64, log logr.Logger) Hasher {
 	}
 }
 
-func (f *FileHasher) HashFile(file string) (int64, error) {
-	f.log.V(3).Info("Hashing file", "file", file)
+func (f *FileHasher) HashFile(fileName string) (int64, error) {
+	f.log.V(3).Info("Hashing file", "file", fileName)
 	t := time.Now()
 	defer func() {
 		f.log.V(3).Info("Hashing took", "milliseconds", time.Since(t).Milliseconds())
 	}()
 	done := make(chan struct{})
-	size, err := f.getFileSize(file)
+	size, err := f.getFileSize(fileName)
 	if err != nil {
 		return 0, err
 	}
@@ -86,9 +85,15 @@ func (f *FileHasher) HashFile(file string) (int64, error) {
 		}
 		go func(h hash.Hash) {
 			defer wg.Done()
+			osFile, err := os.Open(fileName)
+			if err != nil {
+				f.log.Info("Failed to open file", "error", err)
+				return
+			}
 			for offset := range f.queue {
 				h.Reset()
-				if err := f.calculateHash(offset, file, h); err != nil {
+				defer osFile.Close()
+				if err := f.calculateHash(offset, osFile, h); err != nil {
 					f.log.Info("Failed to calculate hash", "offset", offset, "error", err)
 					return
 				}
@@ -105,8 +110,8 @@ func (f *FileHasher) HashFile(file string) (int64, error) {
 	}
 }
 
-func (f *FileHasher) getFileSize(filename string) (int64, error) {
-	file, err := os.Open(filename)
+func (f *FileHasher) getFileSize(fileName string) (int64, error) {
+	file, err := os.Open(fileName)
 	if err != nil {
 		return int64(0), err
 	}
@@ -119,7 +124,7 @@ func (f *FileHasher) getFileSize(filename string) (int64, error) {
 	if err != nil {
 		return int64(0), err
 	}
-	f.log.V(5).Info("File size", "size", size)
+	f.log.V(5).Info("Size", "bytes", size)
 	return size, nil
 }
 
@@ -136,20 +141,14 @@ func (f *FileHasher) calculateOffsets(size int64) {
 	}
 }
 
-func (f *FileHasher) calculateHash(offset int64, file string, h hash.Hash) error {
-	osFile, err := os.Open(file)
-	if err != nil {
-		return err
-	}
-	defer osFile.Close()
-
-	_, err = osFile.Seek(int64(offset), 0)
+func (f *FileHasher) calculateHash(offset int64, rs io.ReadSeeker, h hash.Hash) error {
+	_, err := rs.Seek(int64(offset), 0)
 	if err != nil {
 		f.log.V(5).Info("Failed to seek")
 		return err
 	}
 	buf := make([]byte, f.blockSize)
-	n, err := osFile.Read(buf)
+	n, err := rs.Read(buf)
 	if err != nil {
 		f.log.V(5).Info("Failed to read")
 		return err
@@ -261,7 +260,7 @@ func (f *FileHasher) DeserializeHashes(r io.Reader) (int64, map[int64][]byte, er
 			return 0, nil, err
 		}
 		f.log.V(5).Info("Reading offset", "offset", offset)
-		if offset < 0 || offset > f.fileSize {
+		if offset < 0 || offset > length*blockSize {
 			return 0, nil, fmt.Errorf("invalid offset %d", offset)
 		}
 		hash := make([]byte, 64)

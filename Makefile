@@ -54,3 +54,6 @@ clean: manifest-clean
 	rm -rf _out
 
 build: clean blockrsync
+
+test:
+	go test ./...
