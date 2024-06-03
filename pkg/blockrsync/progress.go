@@ -7,6 +7,11 @@ import (
 	"github.com/go-logr/logr"
 )
 
+type Progress interface {
+	Start(size int64)
+	Update(pos int64)
+}
+
 type progress struct {
 	total        int64
 	current      int64

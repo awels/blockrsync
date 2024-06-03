@@ -165,12 +165,9 @@ func (b *BlockrsyncServer) handleEmptyBlock(offset int64, f *os.File) error {
 }
 
 func (b *BlockrsyncServer) writeBlockToOffset(block []byte, offset int64, ws io.WriteSeeker) error {
-	n, err := ws.Seek(offset, io.SeekStart)
+	_, err := ws.Seek(offset, io.SeekStart)
 	if err != nil {
 		return err
-	}
-	if n != offset {
-		return fmt.Errorf("seek to wrong offset %d, expected %d", n, offset)
 	}
 	if n, err := ws.Write(block); err != nil {
 		return err

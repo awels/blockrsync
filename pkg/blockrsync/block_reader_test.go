@@ -11,10 +11,14 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("block reader", func() {
+const (
+	blockReader = "block reader"
+)
+
+var _ = Describe(blockReader, func() {
 	It("should read from a reader", func() {
 		r := createBytesReader(4)
-		br := NewBlockReader(r, 4, GinkgoLogr.WithName("block reader"))
+		br := NewBlockReader(r, 4, GinkgoLogr.WithName(blockReader))
 		Expect(br).ToNot(BeNil())
 		cont, err := br.Next()
 		Expect(err).ToNot(HaveOccurred())
@@ -42,7 +46,7 @@ var _ = Describe("block reader", func() {
 		b := []byte{}
 		buf := bytes.NewBuffer(b)
 		buf.Write([]byte{1})
-		br := NewBlockReader(buf, 4, GinkgoLogr.WithName("block reader"))
+		br := NewBlockReader(buf, 4, GinkgoLogr.WithName(blockReader))
 		Expect(br).ToNot(BeNil())
 		cont, err := br.Next()
 		Expect(err).ToNot(HaveOccurred())
@@ -55,7 +59,7 @@ var _ = Describe("block reader", func() {
 		buf := bytes.NewBuffer(b)
 		err := binary.Write(buf, binary.LittleEndian, int64(4096))
 		Expect(err).ToNot(HaveOccurred())
-		br := NewBlockReader(buf, 4, GinkgoLogr.WithName("block reader"))
+		br := NewBlockReader(buf, 4, GinkgoLogr.WithName(blockReader))
 		Expect(br).ToNot(BeNil())
 		cont, err := br.Next()
 		Expect(err).ToNot(HaveOccurred())
@@ -69,7 +73,7 @@ var _ = Describe("block reader", func() {
 		err := binary.Write(buf, binary.LittleEndian, int64(4096))
 		Expect(err).ToNot(HaveOccurred())
 		buf.Write([]byte{Hole})
-		br := NewBlockReader(buf, 4, GinkgoLogr.WithName("block reader"))
+		br := NewBlockReader(buf, 4, GinkgoLogr.WithName(blockReader))
 		Expect(br).ToNot(BeNil())
 		cont, err := br.Next()
 		Expect(err).ToNot(HaveOccurred())
@@ -84,7 +88,7 @@ var _ = Describe("block reader", func() {
 		Expect(err).ToNot(HaveOccurred())
 		buf.Write([]byte{Block})
 		buf.Write([]byte{255})
-		br := NewBlockReader(buf, 4, GinkgoLogr.WithName("block reader"))
+		br := NewBlockReader(buf, 4, GinkgoLogr.WithName(blockReader))
 		Expect(br).ToNot(BeNil())
 		cont, err := br.Next()
 		Expect(err).ToNot(HaveOccurred())

@@ -14,23 +14,24 @@ import (
 )
 
 type BlockrsyncClient struct {
-	sourceFile    string
-	targetAddress string
-	hasher        Hasher
-	port          int
-	sourceSize    int64
-	opts          *BlockRsyncOptions
-	log           logr.Logger
+	sourceFile         string
+	hasher             Hasher
+	sourceSize         int64
+	opts               *BlockRsyncOptions
+	log                logr.Logger
+	connectionProvider ConnectionProvider
 }
 
 func NewBlockrsyncClient(sourceFile, targetAddress string, port int, opts *BlockRsyncOptions, logger logr.Logger) *BlockrsyncClient {
 	return &BlockrsyncClient{
-		sourceFile:    sourceFile,
-		targetAddress: targetAddress,
-		hasher:        NewFileHasher(int64(opts.BlockSize), logger.WithName("hasher")),
-		port:          port,
-		opts:          opts,
-		log:           logger,
+		sourceFile: sourceFile,
+		hasher:     NewFileHasher(int64(opts.BlockSize), logger.WithName("hasher")),
+		opts:       opts,
+		log:        logger,
+		connectionProvider: &NetworkConnectionProvider{
+			targetAddress: targetAddress,
+			port:          port,
+		},
 	}
 }
 
@@ -48,22 +49,9 @@ func (b *BlockrsyncClient) ConnectToTarget() error {
 	}
 	b.sourceSize = size
 	b.log.V(5).Info("Hashed file", "filename", b.sourceFile, "size", size)
-	retry := true
-	var conn net.Conn
-	retryCount := 0
-	for retry {
-		conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", b.targetAddress, b.port))
-		retry = err != nil
-		if err != nil {
-			b.log.Error(err, "Unable to connect to target")
-		}
-		if retry {
-			retryCount++
-			time.Sleep(time.Second)
-			if retryCount > 30 {
-				return fmt.Errorf("unable to connect to target after %d retries", retryCount)
-			}
-		}
+	conn, err := b.connectionProvider.Connect()
+	if err != nil {
+		return err
 	}
 	defer conn.Close()
 	reader := snappy.NewReader(conn)
@@ -97,7 +85,7 @@ func (b *BlockrsyncClient) ConnectToTarget() error {
 	return nil
 }
 
-func (b *BlockrsyncClient) writeBlocksToServer(writer io.Writer, offsets []int64, f *os.File, syncProgress *progress) error {
+func (b *BlockrsyncClient) writeBlocksToServer(writer io.Writer, offsets []int64, f io.ReaderAt, syncProgress Progress) error {
 	b.log.V(3).Info("Writing blocks to server")
 	t := time.Now()
 	defer func() {
@@ -112,22 +100,29 @@ func (b *BlockrsyncClient) writeBlocksToServer(writer io.Writer, offsets []int64
 	// Sort diff
 	slices.SortFunc(offsets, int64SortFunc)
 	b.log.V(5).Info("offsets", "values", offsets)
-	syncProgress.Start(int64(len(offsets)) * b.hasher.BlockSize())
+	if syncProgress != nil {
+		syncProgress.Start(int64(len(offsets)) * b.hasher.BlockSize())
+	}
 	buf := make([]byte, b.hasher.BlockSize())
 	for i, offset := range offsets {
 		b.log.V(5).Info("Sending data", "offset", offset, "index", i, "blocksize", b.hasher.BlockSize())
+		if err := binary.Write(writer, binary.LittleEndian, offset); err != nil {
+			return err
+		}
 		n, err := f.ReadAt(buf, offset)
 		if err != nil && err != io.EOF {
 			return err
 		}
-		if err := binary.Write(writer, binary.LittleEndian, offset); err != nil {
-			return err
-		}
 		if isEmptyBlock(buf) {
 			b.log.V(5).Info("Skipping empty block", "offset", offset)
-			writer.Write([]byte{Hole})
+			if _, err := writer.Write([]byte{Hole}); err != nil {
+				return err
+			}
 		} else {
-			writer.Write([]byte{Block})
+			_, err := writer.Write([]byte{Block})
+			if err != nil {
+				return err
+			}
 			if int64(n) != b.hasher.BlockSize() {
 				b.log.V(5).Info("read last bytes", "count", n)
 			}
@@ -138,7 +133,9 @@ func (b *BlockrsyncClient) writeBlocksToServer(writer io.Writer, offsets []int64
 				return err
 			}
 		}
-		syncProgress.Update(int64(i) * b.hasher.BlockSize())
+		if syncProgress != nil {
+			syncProgress.Update(int64(i) * b.hasher.BlockSize())
+		}
 	}
 	return nil
 }
@@ -159,4 +156,30 @@ func int64SortFunc(i, j int64) int {
 		return 1
 	}
 	return 0
+}
+
+type ConnectionProvider interface {
+	Connect() (io.ReadWriteCloser, error)
+}
+
+type NetworkConnectionProvider struct {
+	targetAddress string
+	port          int
+}
+
+func (n *NetworkConnectionProvider) Connect() (io.ReadWriteCloser, error) {
+	retryCount := 0
+	var conn io.ReadWriteCloser
+	var err error
+	for conn == nil {
+		conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", n.targetAddress, n.port))
+		if err != nil {
+			if retryCount > 30 {
+				return nil, fmt.Errorf("unable to connect to target after %d retries", retryCount)
+			}
+			time.Sleep(time.Second)
+			retryCount++
+		}
+	}
+	return conn, nil
 }
