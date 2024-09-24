@@ -39,6 +39,12 @@ WORKDIR /
 COPY --from=blockrsync-builder /workspace/blockrsync /blockrsync
 COPY --from=blockrsync-builder /workspace/proxy /proxy
 
+RUN microdnf update -y
+RUN microdnf -y install openssh-server stunnel rsync nmap && microdnf clean all
+COPY sshd_config /etc/ssh/sshd_config
+COPY stunnel.conf /etc/stunnel/stunnel.conf
+USER 65534:65534
+
 ##### Set build metadata
 ARG builddate_arg="(unknown)"
 ARG version_arg="(unknown)"
