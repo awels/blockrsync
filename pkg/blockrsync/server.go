@@ -99,6 +99,7 @@ func (b *BlockrsyncServer) writeBlocksToFile(f *os.File, reader io.Reader) error
 		_, err = handleReadError(err, nocallback)
 		return err
 	}
+	b.targetFileSize = max(b.targetFileSize, sourceSize)
 	if err := b.truncateFileIfNeeded(f, sourceSize, b.targetFileSize); err != nil {
 		_, err = handleReadError(err, nocallback)
 		return err
@@ -131,16 +132,15 @@ func (b *BlockrsyncServer) truncateFileIfNeeded(f *os.File, sourceSize, targetSi
 	if err != nil {
 		return err
 	}
-	if targetSize > sourceSize {
-		b.log.V(5).Info("Source size", "size", sourceSize)
-		if info.Mode()&(os.ModeDevice|os.ModeCharDevice) == 0 {
-			// Not a block device, truncate the file if it is larger than the source file
-			// Truncate the target file if it is larger than the source file
-			b.log.V(5).Info("Source is smaller than target, truncating file")
-			if err := f.Truncate(sourceSize); err != nil {
-				return err
-			}
-		} else {
+	b.log.V(5).Info("Source size", "size", sourceSize)
+	if info.Mode()&(os.ModeDevice|os.ModeCharDevice) == 0 {
+		// Not a block device, set the file size to the received size
+		b.log.V(3).Info("Setting target file size", "size", targetSize)
+		if err := f.Truncate(sourceSize); err != nil {
+			return err
+		}
+	} else {
+		if targetSize > sourceSize {
 			// empty out existing blocks
 			PunchHole(f, sourceSize, targetSize-sourceSize)
 		}
